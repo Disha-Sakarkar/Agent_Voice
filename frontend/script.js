@@ -1,258 +1,228 @@
-// --- Global State ---
-let mediaRecorder;
-let audioChunks = [];
-let sessionId = null;
-let isRecording = false;
+document.addEventListener('DOMContentLoaded', () => {
+    // --- DOM Element References from YOUR HTML ---
+    const recordBtn = document.getElementById('recordBtn');
+    const statusEl = document.getElementById('status');
+    const chatHistoryContainer = document.getElementById('chat-history');
+    const settingsBtn = document.getElementById('settingsBtn');
+    const settingsModal = document.getElementById('settingsModal');
+    const closeBtn = document.querySelector('.close-btn');
+    const saveKeysBtn = document.getElementById('saveKeysBtn');
+    const murfKeyInput = document.getElementById('murfKey');
+    const assemblyKeyInput = document.getElementById('assemblyKey');
+    const googleKeyInput = document.getElementById('googleKey');
+    const audioPlayer = document.createElement('audio');
 
-// --- DOM Element References ---
-const sessionList = document.getElementById('sessionList');
-const newChatBtn = document.getElementById('newChatBtn');
-const welcomeScreen = document.getElementById('welcomeScreen');
-const chatScreen = document.getElementById('chatScreen');
-const chatContainer = document.getElementById('chatContainer');
-const recordBtn = document.getElementById('recordBtn');
-const convoStatus = document.getElementById('convoStatus');
-const audioPlayer = document.getElementById('convoAudioPlayer');
-
-// --- Initialization ---
-document.addEventListener('DOMContentLoaded', initializeApp);
-
-/**
- * Main app initializer
- */
-async function initializeApp() {
-    await loadAndRenderSessions();
-    setupEventListeners();
-    const urlParams = new URLSearchParams(window.location.search);
-    const currentSessionId = urlParams.get('session_id');
-    if (currentSessionId) {
-        // If a session ID is in the URL, try to load its history
-        loadChatHistory(currentSessionId);
-    } else {
-        // Otherwise, show the welcome screen
-        showWelcomeScreen();
-    }
-}
-
-function setupEventListeners() {
-    newChatBtn.addEventListener('click', createNewChat);
-    recordBtn.addEventListener('click', toggleRecording);
-    audioPlayer.addEventListener('ended', () => {
-        if (isRecording) return;
-        setTimeout(startRecording, 500);
-    });
-}
-
-// --- Session Management ---
-async function loadAndRenderSessions() {
-    try {
-        const response = await fetch('/agent/sessions');
-        const sessions = await response.json();
-        sessionList.innerHTML = '';
-        sessions.forEach(id => {
-            const li = document.createElement('li');
-            li.className = 'session-item';
-            li.dataset.sessionId = id;
-            li.textContent = `Chat - ${id.substring(8, 14)}`;
-
-            const deleteBtn = document.createElement('button');
-            deleteBtn.className = 'delete-btn';
-            deleteBtn.innerHTML = '🗑️';
-            deleteBtn.onclick = (e) => {
-                e.stopPropagation();
-                deleteSession(id);
-            };
-
-            li.appendChild(deleteBtn);
-            li.onclick = () => {
-                // Navigate to the new session URL, triggering initializeApp again
-                window.location.search = `?session_id=${id}`;
-            };
-            sessionList.appendChild(li);
-        });
-    } catch (error) {
-        console.error("Failed to load sessions:", error);
-    }
-}
-
-/**
- * --- FIX: This function is simplified to prevent reloads and loops.
- * It now just generates a new session URL and navigates to it.
- */
-function createNewChat() {
-    const newSessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    window.location.search = `?session_id=${newSessionId}`;
-}
-
-async function deleteSession(id) {
-    try {
-        await fetch(`/agent/chat/${id}`, { method: 'DELETE' });
-        const itemToRemove = sessionList.querySelector(`[data-session-id="${id}"]`);
-        if (itemToRemove) itemToRemove.remove();
-        if (sessionId === id) {
-            // If we deleted the active chat, go to the welcome screen
-            window.location.pathname = '/';
-        }
-    } catch (error) {
-        console.error("Failed to delete session:", error);
-    }
-}
-
-// --- Chat History Management ---
-/**
- * --- MAJOR FIX: This function now correctly handles a 404 for new chats.
- */
-async function loadChatHistory(id) {
-    sessionId = id; // Set the global session ID immediately
-    highlightActiveSession();
+    // --- Global State ---
+    let webSocket;
+    let isRecording = false;
+    let stream, audioContextRecording, processor, source;
+    let apiKeys = { murf: '', assembly: '', google: '' };
     
-    try {
-        const response = await fetch(`/agent/chat/${id}`);
+    // --- Initialization ---
+    function initialize() {
+        loadKeysFromLocalStorage();
+        setupEventListeners();
+    }
 
-        showChatScreen(); // Show the chat UI
-        chatContainer.innerHTML = ''; // Always start with a clean slate
+    function setupEventListeners() {
+        recordBtn.addEventListener('click', toggleRecording);
+        settingsBtn.addEventListener('click', () => settingsModal.style.display = 'block');
+        closeBtn.addEventListener('click', () => settingsModal.style.display = 'none');
+        saveKeysBtn.addEventListener('click', saveKeysToLocalStorage);
+        window.addEventListener('click', (event) => {
+            if (event.target == settingsModal) settingsModal.style.display = 'none';
+        });
+    }
 
-        if (response.status === 404) {
-            // This is NOT an error. It's a new chat session.
-            // The UI is already clean, so we just log it and wait for user input.
-            console.log("Starting new chat session:", id);
+    // --- UI State Management ---
+    function addMessageToHistory(text, type) {
+        // Uses your CSS classes: user-bubble, ai-bubble, system-bubble
+        const bubble = document.createElement('div');
+        bubble.className = `chat-bubble ${type}-bubble`;
+        bubble.textContent = text;
+        chatHistoryContainer.appendChild(bubble);
+        chatHistoryContainer.scrollTop = chatHistoryContainer.scrollHeight;
+    }
+
+    function updateLiveTranscript(text) {
+        let liveBubble = chatHistoryContainer.querySelector('.user-bubble.live');
+        if (!liveBubble) {
+            liveBubble = document.createElement('div');
+            liveBubble.className = 'chat-bubble user-bubble live';
+            addMessageToHistory('', 'user'); // Add a placeholder bubble
+            liveBubble = chatHistoryContainer.querySelector('.user-bubble:last-child');
+            liveBubble.classList.add('live');
+        }
+        liveBubble.textContent = text;
+        chatHistoryContainer.scrollTop = chatHistoryContainer.scrollHeight;
+    }
+
+    // --- API Key Management ---
+    function loadKeysFromLocalStorage() {
+        apiKeys.murf = localStorage.getItem('murfKey') || '';
+        apiKeys.assembly = localStorage.getItem('assemblyKey') || '';
+        apiKeys.google = localStorage.getItem('googleKey') || '';
+        murfKeyInput.value = apiKeys.murf;
+        assemblyKeyInput.value = apiKeys.assembly;
+        googleKeyInput.value = apiKeys.google;
+
+        if (!apiKeys.murf || !apiKeys.assembly || !apiKeys.google) {
+            statusEl.textContent = "Please enter API keys in Settings.";
+            recordBtn.disabled = true;
+            addMessageToHistory("Welcome! Please enter your API keys in the ⚙️ Settings menu to begin.", 'system');
+        } else {
+            statusEl.textContent = "Ready. Click the mic to start.";
+            recordBtn.disabled = false;
+        }
+    }
+
+    function saveKeysToLocalStorage() {
+        // Simplified for your 3 keys
+        const murfKey = murfKeyInput.value.trim();
+        const assemblyKey = assemblyKeyInput.value.trim();
+        const googleKey = googleKeyInput.value.trim();
+
+        if (!murfKey || !assemblyKey || !googleKey) {
+            alert("Please enter all three API keys before saving.");
             return;
         }
+        localStorage.setItem('murfKey', murfKey);
+        localStorage.setItem('assemblyKey', assemblyKey);
+        localStorage.setItem('googleKey', googleKey);
         
-        if (!response.ok) {
-            // Handle other, real errors (like 500)
-            throw new Error(`Server error: ${response.status}`);
-        }
-
-        // If response is OK, render the history
-        const history = await response.json();
-        history.forEach(message => {
-            appendBubble(message.parts[0].text, message.role === 'user' ? 'user' : 'ai');
-        });
-
-    } catch (error) {
-        console.error("Failed to load chat history:", error);
-        alert("Could not load the chat session. Please try again.");
-        showWelcomeScreen(); // Show welcome screen on critical error
+        settingsModal.style.display = 'none';
+        loadKeysFromLocalStorage();
+        alert("API Keys saved successfully!");
     }
-}
 
-function appendBubble(text, type) {
-    const bubble = document.createElement('div');
-    bubble.className = `chat-bubble ${type}-bubble`;
-    bubble.textContent = text;
-    chatContainer.appendChild(bubble);
-    chatContainer.scrollTop = chatContainer.scrollHeight;
-}
+    // --- WebSocket Logic ---
+    // In frontend/script.js
 
-// --- UI State Management ---
-function showWelcomeScreen() {
-    welcomeScreen.style.display = 'flex';
-    chatScreen.style.display = 'none';
-}
+function setupWebSocket() {
+    return new Promise((resolve, reject) => {
+        // --- 🎯 THIS IS THE DYNAMIC URL LOGIC 🎯 ---
+        // It checks if the site is secure (https) and uses the current host address
+        const isSecure = window.location.protocol === 'https:';
+        const wsProtocol = isSecure ? 'wss://' : 'ws://';
+        const wsHost = window.location.host; // This gets '127.0.0.1:8000' or 'your-deployed-site.com'
+        const sessionId = `session_${Date.now()}`;
 
-function showChatScreen() {
-    welcomeScreen.style.display = 'none';
-    chatScreen.style.display = 'flex';
-}
+        // This line now builds the URL dynamically
+        const wsUrl = `${wsProtocol}${wsHost}/ws?session_id=${sessionId}&murf_key=${apiKeys.murf}&assembly_key=${apiKeys.assembly}&google_key=${apiKeys.google}`;
+        
+        console.log(`Connecting to WebSocket at: ${wsUrl}`);
+        webSocket = new WebSocket(wsUrl);
+        
+        // The rest of the function remains the same
+        webSocket.onopen = () => { console.log("WebSocket established!"); resolve(); };
+        webSocket.onerror = (error) => { console.error("WebSocket Error:", error); statusEl.textContent = "Connection error."; reject(error); };
+        webSocket.onclose = () => { console.log("WebSocket closed."); if (isRecording) stopRecordingCleanup(); };
 
-function highlightActiveSession() {
-    document.querySelectorAll('.session-item').forEach(item => {
-        item.classList.remove('active');
-        if (item.dataset.sessionId === sessionId) {
-            item.classList.add('active');
-        }
+        let audioChunksPlayback = [];
+        webSocket.onmessage = (event) => {
+            const message = event.data;
+            if (message.startsWith("AUDIO_CHUNK:")) {
+                audioChunksPlayback.push(base64ToArrayBuffer(message.substring("AUDIO_CHUNK:".length)));
+            } else if (message === "AUDIO_END") {
+                playConcatenatedAudio(audioChunksPlayback, () => { audioChunksPlayback = []; });
+                statusEl.textContent = "Ready. Click the mic to start.";
+            } else if (message.startsWith("AI_RESPONSE:")) {
+                addMessageToHistory(message.substring("AI_RESPONSE:".length), 'ai');
+                statusEl.textContent = "Speaking...";
+            } else if (message === "END_OF_TURN") {
+                const userBubble = chatHistoryContainer.querySelector('.user-bubble.live');
+                if (userBubble) userBubble.classList.remove('live');
+                statusEl.textContent = "Thinking...";
+            } else {
+                updateLiveTranscript(message);
+            }
+        };
     });
 }
 
-function updateButtonUI(recording) {
-    const icon = recordBtn.querySelector('.icon');
-    if (recording) {
-        recordBtn.classList.add("recording");
-        icon.textContent = "⏹️";
-    } else {
-        recordBtn.classList.remove("recording");
-        icon.textContent = "🎙️";
-    }
-}
+    // --- Audio Recording & Playback ---
+    async function startRecording() {
+        if (isRecording) return;
 
-// --- Recording & Conversation Logic ---
-function toggleRecording() {
-    if (!sessionId) {
-        alert("Please start a new chat first.");
-        return;
-    }
-    isRecording ? stopRecording() : startRecording();
-}
+        // Interrupt AI playback if user starts talking (barge-in)
+        if (!audioPlayer.paused) {
+            audioPlayer.pause();
+            audioPlayer.currentTime = 0;
+            console.log("Agent playback interrupted.");
+        }
 
-async function startRecording() {
-    if (isRecording) return;
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        mediaRecorder = new MediaRecorder(stream);
-        audioChunks = [];
-        mediaRecorder.ondataavailable = event => audioChunks.push(event.data);
-        mediaRecorder.onstop = processConversation;
-        mediaRecorder.start();
         isRecording = true;
         updateButtonUI(true);
-        convoStatus.textContent = "Listening...";
-    } catch (err) {
-        convoStatus.textContent = "Microphone access denied.";
+        statusEl.textContent = "Connecting...";
+        try {
+            await setupWebSocket();
+            stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            audioContextRecording = new AudioContext({ sampleRate: 16000 });
+            source = audioContextRecording.createMediaStreamSource(stream);
+            processor = audioContextRecording.createScriptProcessor(4096, 1, 1);
+            source.connect(processor);
+            processor.connect(audioContextRecording.destination);
+            processor.onaudioprocess = (e) => {
+                const pcmData = floatTo16BitPCM(e.inputBuffer.getChannelData(0));
+                if (webSocket && webSocket.readyState === WebSocket.OPEN) {
+                    webSocket.send(pcmData);
+                }
+            };
+            statusEl.textContent = "Listening...";
+        } catch (err) {
+            console.error("Recording error:", err);
+            statusEl.textContent = "Could not start. Check permissions.";
+            stopRecordingCleanup();
+        }
     }
-}
 
-function stopRecording() {
-    if (mediaRecorder) {
-        mediaRecorder.stop();
+    function stopRecording() {
+        if (webSocket && webSocket.readyState === WebSocket.OPEN) webSocket.close();
+        stopRecordingCleanup();
+    }
+
+    function stopRecordingCleanup() {
+        if (processor) { processor.disconnect(); processor.onaudioprocess = null; }
+        if (source) source.disconnect();
+        if (audioContextRecording && audioContextRecording.state !== 'closed') audioContextRecording.close();
+        if (stream) { stream.getTracks().forEach(track => track.stop()); }
         isRecording = false;
         updateButtonUI(false);
+        statusEl.textContent = "Ready. Click the mic to start.";
     }
-}
 
-async function processConversation() {
-    convoStatus.textContent = "Thinking...";
-    const audioBlob = new Blob(audioChunks, { type: "audio/wav" });
-    const formData = new FormData();
-    formData.append("file", audioBlob, "recording.wav");
-    
-    // Check if the current session exists in the sidebar, if not, it's new
-    const isNewSession = !sessionList.querySelector(`[data-session-id="${sessionId}"]`);
-    
-    try {
-        const response = await fetch(`/agent/chat/${sessionId}`, { method: 'POST', body: formData });
-        if (!response.ok) {
-            const errData = await response.json();
-            throw new Error(errData.detail);
-        }
-        const data = await response.json();
-        
-        // --- FIX: Logic to append bubbles correctly ---
-        // If the chat container was empty, this is the first exchange
-        if (chatContainer.innerHTML === '') {
-             if (data.user_query) appendBubble(data.user_query, 'user');
-        } else {
-            // Otherwise, we only need to add the AI's response bubble because the user's bubble
-            // was added optimistically right after recording stopped (in a future improvement)
-            // For now, let's just add both.
-             if (data.user_query) appendBubble(data.user_query, 'user');
-        }
-       
-        if (data.llm_response) appendBubble(data.llm_response, 'ai');
-
-        if (data.audio_url) {
-            audioPlayer.src = data.audio_url;
-            audioPlayer.play();
-            convoStatus.textContent = "Responded. Listening for your reply...";
-        }
-    } catch (error) {
-        convoStatus.textContent = `Error: ${error.message}`;
-    } finally {
-        isRecording = false;
-        updateButtonUI(false);
-        // If it was a new session, reload the session list to show it
-        if (isNewSession) {
-            loadAndRenderSessions();
-        }
+    function toggleRecording() { isRecording ? stopRecording() : startRecording(); }
+    function updateButtonUI(recording) {
+        const icon = recordBtn.querySelector('.icon');
+        recordBtn.classList.toggle("recording", recording);
+        icon.textContent = recording ? "⏹️" : "🎙️";
     }
-}
+    
+    // --- Utility Functions ---
+    function floatTo16BitPCM(input) {
+        const buffer = new ArrayBuffer(input.length * 2);
+        const view = new DataView(buffer);
+        for (let i = 0; i < input.length; i++) {
+            const s = Math.max(-1, Math.min(1, input[i]));
+            view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+        }
+        return buffer;
+    }
+    function base64ToArrayBuffer(base64) {
+        const binaryString = window.atob(base64);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) { bytes[i] = binaryString.charCodeAt(i); }
+        return bytes.buffer;
+    }
+    function playConcatenatedAudio(audioChunks, onEndedCallback) {
+        if (audioChunks.length === 0) return;
+        const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+        const audioUrl = URL.createObjectURL(audioBlob);
+        audioPlayer.src = audioUrl;
+        audioPlayer.play();
+        audioPlayer.onended = () => { URL.revokeObjectURL(audioUrl); if (onEndedCallback) onEndedCallback(); };
+    }
+    
+    initialize();
+});
