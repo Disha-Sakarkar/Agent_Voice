@@ -1,204 +1,169 @@
 document.addEventListener('DOMContentLoaded', () => {
-    // --- DOM Element References from YOUR HTML ---
+    // --- DOM Element References ---
     const recordBtn = document.getElementById('recordBtn');
     const statusEl = document.getElementById('status');
-    const chatHistoryContainer = document.getElementById('chat-history');
+    const chatHistory = document.getElementById('chat-history');
+    const audioPlayer = document.createElement('audio');
+
+    // Settings Modal Elements
     const settingsBtn = document.getElementById('settingsBtn');
     const settingsModal = document.getElementById('settingsModal');
     const closeBtn = document.querySelector('.close-btn');
     const saveKeysBtn = document.getElementById('saveKeysBtn');
-    const murfKeyInput = document.getElementById('murfKey');
-    const assemblyKeyInput = document.getElementById('assemblyKey');
-    const googleKeyInput = document.getElementById('googleKey');
-    const audioPlayer = document.createElement('audio');
 
     // --- Global State ---
-    let webSocket;
     let isRecording = false;
-    let stream, audioContextRecording, processor, source;
-    let apiKeys = { murf: '', assembly: '', google: '' };
+    let webSocket = null;
+    let fullTranscript = "";
+    let audioChunksPlayback = [];
     
+    // Web Audio API for recording
+    let stream, audioContextRecording, processor, source;
+
     // --- Initialization ---
-    function initialize() {
-        loadKeysFromLocalStorage();
+    function initializeApp() {
+        loadApiKeys();
+        checkKeysAndSetStatus();
         setupEventListeners();
+        addMessage("Greetings, Noble Friend! How may I assist you today?", 'ai');
     }
 
     function setupEventListeners() {
         recordBtn.addEventListener('click', toggleRecording);
         settingsBtn.addEventListener('click', () => settingsModal.style.display = 'block');
         closeBtn.addEventListener('click', () => settingsModal.style.display = 'none');
-        saveKeysBtn.addEventListener('click', saveKeysToLocalStorage);
-        window.addEventListener('click', (event) => {
-            if (event.target == settingsModal) settingsModal.style.display = 'none';
+        saveKeysBtn.addEventListener('click', () => {
+            saveApiKeys();
+            settingsModal.style.display = 'none';
+            checkKeysAndSetStatus();
         });
-    }
-
-    // --- UI State Management ---
-    function addMessageToHistory(text, type) {
-        // Uses your CSS classes: user-bubble, ai-bubble, system-bubble
-        const bubble = document.createElement('div');
-        bubble.className = `chat-bubble ${type}-bubble`;
-        bubble.textContent = text;
-        chatHistoryContainer.appendChild(bubble);
-        chatHistoryContainer.scrollTop = chatHistoryContainer.scrollHeight;
-    }
-
-    function updateLiveTranscript(text) {
-        let liveBubble = chatHistoryContainer.querySelector('.user-bubble.live');
-        if (!liveBubble) {
-            liveBubble = document.createElement('div');
-            liveBubble.className = 'chat-bubble user-bubble live';
-            addMessageToHistory('', 'user'); // Add a placeholder bubble
-            liveBubble = chatHistoryContainer.querySelector('.user-bubble:last-child');
-            liveBubble.classList.add('live');
+        window.onclick = (event) => {
+            if (event.target == settingsModal) {
+                settingsModal.style.display = "none";
+            }
         }
-        liveBubble.textContent = text;
-        chatHistoryContainer.scrollTop = chatHistoryContainer.scrollHeight;
     }
 
     // --- API Key Management ---
-    function loadKeysFromLocalStorage() {
-        apiKeys.murf = localStorage.getItem('murfKey') || '';
-        apiKeys.assembly = localStorage.getItem('assemblyKey') || '';
-        apiKeys.google = localStorage.getItem('googleKey') || '';
-        murfKeyInput.value = apiKeys.murf;
-        assemblyKeyInput.value = apiKeys.assembly;
-        googleKeyInput.value = apiKeys.google;
+    function saveApiKeys() {
+        localStorage.setItem('assemblyai_key', document.getElementById('assemblyKey').value);
+        localStorage.setItem('google_gemini_key', document.getElementById('googleKey').value);
+        localStorage.setItem('murf_ai_key', document.getElementById('murfKey').value);
+        alert("Your royal keys have been saved!");
+    }
 
-        if (!apiKeys.murf || !apiKeys.assembly || !apiKeys.google) {
-            statusEl.textContent = "Please enter API keys in Settings.";
+    function loadApiKeys() {
+        document.getElementById('assemblyKey').value = localStorage.getItem('assemblyai_key') || '';
+        document.getElementById('googleKey').value = localStorage.getItem('google_gemini_key') || '';
+        document.getElementById('murfKey').value = localStorage.getItem('murf_ai_key') || '';
+    }
+
+    function getApiKeys() {
+        return {
+            assemblyai: localStorage.getItem('assemblyai_key'),
+            google_gemini: localStorage.getItem('google_gemini_key'),
+            murf_ai: localStorage.getItem('murf_ai_key'),
+        };
+    }
+
+    function checkKeysAndSetStatus() {
+        const keys = getApiKeys();
+        if (!keys.assemblyai || !keys.google_gemini || !keys.murf_ai) {
             recordBtn.disabled = true;
-            addMessageToHistory("Welcome! Please enter your API keys in the ⚙️ Settings menu to begin.", 'system');
+            statusEl.textContent = "Please provide the secret keys in the settings ⚙️";
         } else {
-            statusEl.textContent = "Ready. Click the mic to start.";
             recordBtn.disabled = false;
+            statusEl.textContent = "Ready for your command";
         }
     }
 
-    function saveKeysToLocalStorage() {
-        // Simplified for your 3 keys
-        const murfKey = murfKeyInput.value.trim();
-        const assemblyKey = assemblyKeyInput.value.trim();
-        const googleKey = googleKeyInput.value.trim();
+    // --- Chat History & UI ---
+    function addMessage(text, type) {
+        const bubble = document.createElement('div');
+        bubble.className = `chat-bubble ${type}-bubble`;
+        bubble.textContent = text;
+        chatHistory.appendChild(bubble);
+        chatHistory.scrollTop = chatHistory.scrollHeight;
+    }
 
-        if (!murfKey || !assemblyKey || !googleKey) {
-            alert("Please enter all three API keys before saving.");
-            return;
+    function updateLiveTranscript(text) {
+        let liveBubble = chatHistory.querySelector('.user-bubble.live');
+        if (!liveBubble) {
+            liveBubble = document.createElement('div');
+            liveBubble.className = 'chat-bubble user-bubble live';
+            chatHistory.appendChild(liveBubble);
         }
-        localStorage.setItem('murfKey', murfKey);
-        localStorage.setItem('assemblyKey', assemblyKey);
-        localStorage.setItem('googleKey', googleKey);
-        
-        settingsModal.style.display = 'none';
-        loadKeysFromLocalStorage();
-        alert("API Keys saved successfully!");
+        liveBubble.textContent = text;
+        chatHistory.scrollTop = chatHistory.scrollHeight;
     }
 
     // --- WebSocket Logic ---
-    // In frontend/script.js
+    function setupWebSocket() {
+        return new Promise((resolve, reject) => {
+            const keys = getApiKeys();
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const finalWsUrl = `${protocol}//${window.location.host}/ws?assemblyai_key=${keys.assemblyai}&google_gemini_key=${keys.google_gemini}&murf_ai_key=${keys.murf_ai}`;
 
-function setupWebSocket() {
-    return new Promise((resolve, reject) => {
-        // --- 🎯 THIS IS THE DYNAMIC URL LOGIC 🎯 ---
-        // It checks if the site is secure (https) and uses the current host address
-        const isSecure = window.location.protocol === 'https:';
-        const wsProtocol = isSecure ? 'wss://' : 'ws://';
-        const wsHost = window.location.host; // This gets '127.0.0.1:8000' or 'your-deployed-site.com'
-        const sessionId = `session_${Date.now()}`;
-
-        // This line now builds the URL dynamically
-        const wsUrl = `${wsProtocol}${wsHost}/ws?session_id=${sessionId}&murf_key=${apiKeys.murf}&assembly_key=${apiKeys.assembly}&google_key=${apiKeys.google}`;
-        
-        console.log(`Connecting to WebSocket at: ${wsUrl}`);
-        webSocket = new WebSocket(wsUrl);
-        
-        // The rest of the function remains the same
-        webSocket.onopen = () => { console.log("WebSocket established!"); resolve(); };
-        webSocket.onerror = (error) => { console.error("WebSocket Error:", error); statusEl.textContent = "Connection error."; reject(error); };
-        webSocket.onclose = () => { console.log("WebSocket closed."); if (isRecording) stopRecordingCleanup(); };
-
-        let audioChunksPlayback = [];
-        webSocket.onmessage = (event) => {
-            const message = event.data;
-            if (message.startsWith("AUDIO_CHUNK:")) {
-                audioChunksPlayback.push(base64ToArrayBuffer(message.substring("AUDIO_CHUNK:".length)));
-            } else if (message === "AUDIO_END") {
-                playConcatenatedAudio(audioChunksPlayback, () => { audioChunksPlayback = []; });
-                statusEl.textContent = "Ready. Click the mic to start.";
-            } else if (message.startsWith("AI_RESPONSE:")) {
-                addMessageToHistory(message.substring("AI_RESPONSE:".length), 'ai');
-                statusEl.textContent = "Speaking...";
-            } else if (message === "END_OF_TURN") {
-                const userBubble = chatHistoryContainer.querySelector('.user-bubble.live');
-                if (userBubble) userBubble.classList.remove('live');
-                statusEl.textContent = "Thinking...";
-            } else {
-                updateLiveTranscript(message);
-            }
-        };
-    });
-}
-
-    // --- Audio Recording & Playback ---
-    async function startRecording() {
-        if (isRecording) return;
-
-        // Interrupt AI playback if user starts talking (barge-in)
-        if (!audioPlayer.paused) {
-            audioPlayer.pause();
-            audioPlayer.currentTime = 0;
-            console.log("Agent playback interrupted.");
-        }
-
-        isRecording = true;
-        updateButtonUI(true);
-        statusEl.textContent = "Connecting...";
-        try {
-            await setupWebSocket();
-            stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            audioContextRecording = new AudioContext({ sampleRate: 16000 });
-            source = audioContextRecording.createMediaStreamSource(stream);
-            processor = audioContextRecording.createScriptProcessor(4096, 1, 1);
-            source.connect(processor);
-            processor.connect(audioContextRecording.destination);
-            processor.onaudioprocess = (e) => {
-                const pcmData = floatTo16BitPCM(e.inputBuffer.getChannelData(0));
-                if (webSocket && webSocket.readyState === WebSocket.OPEN) {
-                    webSocket.send(pcmData);
-                }
+            webSocket = new WebSocket(finalWsUrl);
+            webSocket.onopen = resolve;
+            webSocket.onmessage = handleWebSocketMessage;
+            webSocket.onerror = (error) => { reject(error); };
+            webSocket.onclose = (event) => { 
+                if (isRecording) { stopRecordingCleanup(); } 
+                statusEl.textContent = event.reason || "My royal duties are complete. Speak again when you wish!"; 
             };
-            statusEl.textContent = "Listening...";
-        } catch (err) {
-            console.error("Recording error:", err);
-            statusEl.textContent = "Could not start. Check permissions.";
-            stopRecordingCleanup();
+        });
+    }
+
+    function handleWebSocketMessage(event) {
+        const message = event.data;
+        if (message.startsWith("AUDIO_CHUNK:")) {
+            audioChunksPlayback.push(base64ToArrayBuffer(message.substring("AUDIO_CHUNK:".length)));
+        } else if (message === "AUDIO_END") {
+            playConcatenatedAudio();
+        } else if (message.startsWith("AI_RESPONSE:")) {
+            const aiResponse = message.substring("AI_RESPONSE:".length);
+            addMessage(aiResponse, 'ai');
+            statusEl.textContent = "Her Highness is speaking...";
+        } else if (message === "END_OF_TURN") {
+            const liveBubble = chatHistory.querySelector('.user-bubble.live');
+            if (liveBubble) {
+                liveBubble.classList.remove('live');
+            }
+            statusEl.textContent = "Considering your request...";
+        } else {
+            updateLiveTranscript(message);
         }
     }
 
-    function stopRecording() {
-        if (webSocket && webSocket.readyState === WebSocket.OPEN) webSocket.close();
-        stopRecordingCleanup();
+    // --- Audio Playback Functions ---
+    function base64ToArrayBuffer(base64) {
+        const binaryString = window.atob(base64);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+        }
+        return bytes.buffer;
     }
 
-    function stopRecordingCleanup() {
-        if (processor) { processor.disconnect(); processor.onaudioprocess = null; }
-        if (source) source.disconnect();
-        if (audioContextRecording && audioContextRecording.state !== 'closed') audioContextRecording.close();
-        if (stream) { stream.getTracks().forEach(track => track.stop()); }
-        isRecording = false;
-        updateButtonUI(false);
-        statusEl.textContent = "Ready. Click the mic to start.";
+    function playConcatenatedAudio() {
+        if (audioChunksPlayback.length === 0) return;
+        const audioBlob = new Blob(audioChunksPlayback, { type: 'audio/wav' });
+        const audioUrl = URL.createObjectURL(audioBlob);
+        audioPlayer.src = audioUrl;
+        audioPlayer.play();
+        audioPlayer.onended = () => {
+            console.log("Playback finished.");
+            URL.revokeObjectURL(audioUrl);
+            audioChunksPlayback = [];
+            statusEl.textContent = "Ready for your command";
+        };
     }
 
+    // --- Recording Functions ---
     function toggleRecording() { isRecording ? stopRecording() : startRecording(); }
-    function updateButtonUI(recording) {
-        const icon = recordBtn.querySelector('.icon');
-        recordBtn.classList.toggle("recording", recording);
-        icon.textContent = recording ? "⏹️" : "🎙️";
-    }
-    
-    // --- Utility Functions ---
+
     function floatTo16BitPCM(input) {
         const buffer = new ArrayBuffer(input.length * 2);
         const view = new DataView(buffer);
@@ -208,21 +173,68 @@ function setupWebSocket() {
         }
         return buffer;
     }
-    function base64ToArrayBuffer(base64) {
-        const binaryString = window.atob(base64);
-        const len = binaryString.length;
-        const bytes = new Uint8Array(len);
-        for (let i = 0; i < len; i++) { bytes[i] = binaryString.charCodeAt(i); }
-        return bytes.buffer;
+
+    async function startRecording() {
+        if (isRecording) return;
+
+        if (!audioPlayer.paused) {
+            audioPlayer.pause();
+            audioPlayer.currentTime = 0;
+            console.log("Agent playback interrupted.");
+        }
+
+        isRecording = true;
+        updateButtonUI(true);
+        statusEl.textContent = "Connecting...";
+
+        try {
+            await setupWebSocket();
+            stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            audioContextRecording = new AudioContext({ sampleRate: 16000 });
+            source = audioContextRecording.createMediaStreamSource(stream);
+            processor = audioContextRecording.createScriptProcessor(4096, 1, 1);
+            source.connect(processor);
+            processor.connect(audioContextRecording.destination);
+            processor.onaudioprocess = (e) => {
+                const inputData = e.inputBuffer.getChannelData(0);
+                const pcmData = floatTo16BitPCM(inputData);
+                if (webSocket && webSocket.readyState === WebSocket.OPEN) {
+                    webSocket.send(pcmData);
+                }
+            };
+        } catch (err) {
+            console.error("Microphone or WebSocket error:", err);
+            statusEl.textContent = "Could not start recording.";
+            stopRecordingCleanup();
+        }
     }
-    function playConcatenatedAudio(audioChunks, onEndedCallback) {
-        if (audioChunks.length === 0) return;
-        const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
-        const audioUrl = URL.createObjectURL(audioBlob);
-        audioPlayer.src = audioUrl;
-        audioPlayer.play();
-        audioPlayer.onended = () => { URL.revokeObjectURL(audioUrl); if (onEndedCallback) onEndedCallback(); };
+
+    function stopRecording() {
+        if (webSocket && webSocket.readyState === WebSocket.OPEN) {
+            webSocket.close();
+        }
+        stopRecordingCleanup();
     }
-    
-    initialize();
+
+    function stopRecordingCleanup() {
+        if (processor) { processor.disconnect(); processor.onaudioprocess = null; }
+        if (source) source.disconnect();
+        if (audioContextRecording) audioContextRecording.close();
+        if (stream) { stream.getTracks().forEach(track => track.stop()); }
+        isRecording = false;
+        updateButtonUI(false);
+    }
+
+    function updateButtonUI(recording) {
+        const icon = recordBtn.querySelector('.icon');
+        if (recording) {
+            recordBtn.classList.add("recording");
+            icon.textContent = "⏹️";
+        } else {
+            recordBtn.classList.remove("recording");
+            icon.textContent = "🎙️";
+        }
+    }
+
+    initializeApp();
 });

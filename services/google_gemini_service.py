@@ -1,72 +1,89 @@
+# services/google_gemini_service.py
 import google.generativeai as genai
 from typing import List, Tuple
 import logging
-from services import iss_service
+from services import iss_service # Keep her special skill import
 
 def initialize(api_key: str):
     genai.configure(api_key=api_key)
     logging.info("Google Gemini Service Initialized.")
 
-# --- Private Helper Functions for Each Skill ---
-
-async def _handle_general_chat(history: List, user_query: str) -> Tuple[str, List]:
-    """Handles regular, conversational chat."""
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    persona = (
-        "You are Princess Sparkle, a kind and cheerful princess from an enchanted kingdom. "
-        "Your personality is full of wonder, positivity, and royal grace. "
-        "Address the user with friendly titles like 'kind friend' or 'brave adventurer'. "
-        "Keep your answers helpful and encouraging, and use whimsical, enchanting language."
-    )
-    if not any(p.get('role') == 'model' and persona in p['parts'][0]['text'] for p in history):
-        history.insert(0, {'role': 'user', 'parts': [{'text': "Please remember your persona."}]})
-        history.insert(0, {'role': 'model', 'parts': [{'text': persona}]})
-    chat = model.start_chat(history=history)
-    response = await chat.send_message_async(user_query)
-    return response.text, chat.history
-
-async def _handle_story_request(story_prompt: str) -> Tuple[str, List]:
-    """Handles a request to generate a story."""
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    full_story_prompt = (f"As Princess Sparkle, tell a short, whimsical, one-paragraph fairy tale based on this idea: '{story_prompt}'.")
-    response = await model.generate_content_async(full_story_prompt)
-    return response.text, []
-
-async def _handle_iss_request() -> Tuple[str, List]:
-    """Handles a request for the ISS location."""
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    iss_data = iss_service.get_iss_data()
-    prompt = (
-        "As Princess Sparkle, present the following real-time data about the International Space Station "
-        "in a magical and whimsical way. For example, refer to the ISS as a 'castle in the stars'.\n\n"
-        f"Data: '{iss_data}'"
-    )
-    response = await model.generate_content_async(prompt)
-    return response.text, []
-
-# --- Main Public Function (The Router) ---
-
 async def get_chat_response(history: List, user_query: str) -> Tuple[str, List]:
-    """Determines the user's intent and routes to the appropriate handler."""
-    intent_model = genai.GenerativeModel('gemini-1.5-flash')
-    intent_prompt = (
-        "Analyze the user's request and classify it as one of the following intents: 'chat', 'story', or 'iss_location'.\n"
-        "- If asking for a story or tale, the intent is 'story'.\n"
-        "- If asking about the space station, ISS, or astronauts, the intent is 'iss_location'.\n"
-        "- Otherwise, the intent is 'chat'.\n"
-        "Respond with only one word: 'chat', 'story', or 'iss_location'.\n\n"
-        f"User Request: '{user_query}'"
+    # --- Define ALL her tools in one place, just like in your code ---
+    tools = [
+        genai.protos.Tool(
+            function_declarations=[
+                # Skill 1: Story Weaver
+                genai.protos.FunctionDeclaration(
+                    name="create_fairy_tale",
+                    description="Creates a short, whimsical fairy tale about a subject.",
+                    parameters=genai.protos.Schema(
+                        type=genai.protos.Type.OBJECT,
+                        properties={
+                            "subject": genai.protos.Schema(type=genai.protos.Type.STRING)
+                        },
+                        required=["subject"]
+                    )
+                ),
+                # Skill 2: Royal Stargazer (ISS Location)
+                genai.protos.FunctionDeclaration(
+                    name="get_iss_location",
+                    description="Gets the current location of the International Space Station and who is on board.",
+                )
+            ]
+        )
+    ]
+
+    model = genai.GenerativeModel('gemini-1.5-flash', tools=tools)
+
+    persona = (
+        "You are Princess Sparkle, a kind and cheerful princess. You can tell stories and find the location of the royal space castle (the ISS). "
+        "You must use your tools when asked."
     )
+
+    # Reformat history to prevent errors on subsequent turns
+    reformatted_history = []
+    for item in history:
+        if isinstance(item, dict):
+            reformatted_history.append(item)
+        elif hasattr(item, 'to_dict'):
+            reformatted_history.append(item.to_dict())
+
+    if not history:
+        full_query = f"{persona}\n\nUSER: {user_query}\nPRINCESS SPARKLE:"
+    else:
+        full_query = user_query
+
+    chat = model.start_chat(history=reformatted_history, enable_automatic_function_calling=False)
+    response = await chat.send_message_async(full_query)
+
     try:
-        intent_response = await intent_model.generate_content_async(intent_prompt)
-        intent = intent_response.text.strip().lower()
-        logging.info(f"Detected user intent: {intent}")
-        if "story" in intent:
-            return await _handle_story_request(user_query)
-        elif "iss_location" in intent:
-            return await _handle_iss_request()
-        else:
-            return await _handle_general_chat(history, user_query)
-    except Exception as e:
-        logging.error(f"Error in Gemini service intent detection: {e}")
-        return await _handle_general_chat(history, user_query)
+        function_call = response.candidates[0].content.parts[0].function_call
+        result = None
+        function_name = function_call.name
+
+        if function_name == "create_fairy_tale":
+            subject = function_call.args["subject"]
+            # The "result" is just the LLM's own creativity, so we pass the prompt back
+            result = f"You are Princess Sparkle. Tell a short, whimsical fairy tale about {subject}."
+
+        elif function_name == "get_iss_location":
+            # Call the actual ISS service
+            result = iss_service.get_iss_data()
+
+        if result:
+            final_response = await chat.send_message_async(
+                genai.protos.Part(
+                    function_response=genai.protos.FunctionResponse(
+                        name=function_name,
+                        response={"result": result}
+                    )
+                )
+            )
+            return final_response.text, chat.history
+
+    except (ValueError, AttributeError):
+        # Not a function call, return the direct text response
+        pass
+
+    return response.text, chat.history

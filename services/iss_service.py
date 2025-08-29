@@ -1,12 +1,9 @@
-# services/iss_service.py
-
 import requests
 import logging
 
 def get_iss_data() -> str:
     """
     Fetches real-time data about the International Space Station (ISS).
-    
     :return: A formatted string with the ISS location and astronaut names.
     """
     try:
@@ -25,7 +22,6 @@ def get_iss_data() -> str:
         
         astronauts = [person['name'] for person in people_data['people'] if person['craft'] == 'ISS']
         
-        # We will return the raw data and let the LLM make it sound magical
         return f"The ISS is currently at latitude {lat} and longitude {lon}. The astronauts on board are: {', '.join(astronauts)}."
 
     except Exception as e:
