@@ -4,7 +4,7 @@ Welcome! This is my project for the *"30 Days of AI Voice Agents" challenge*. Ov
 
 This project is a complete, end-to-end application that demonstrates a modern voice AI pipeline, from audio capture in the browser to a sophisticated, multi-skilled backend.
 
-(https://github.com/Disha-Sakarkar/Agent_Voice/blob/main/Screenshot%202025-08-30%20205937.png?raw=true)
+[Screenshot](https://github.com/Disha-Sakarkar/Agent_Voice/blob/main/Screenshot%202025-08-30%20205937.png?raw=true)
 ---
 
 ## ✨ Features
