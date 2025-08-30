@@ -1,92 +1,66 @@
-# 🤖 AI Voice Agent - 30 Days of AI Challenge
+# 👑 My AI Voice Agent: "Your Royal Companion"
 
-This project is a fully conversational AI voice agent built as part of the **#30DaysofVoiceAgents** challenge by Murf AI. It features a complete voice-in, voice-out pipeline with persistent chat history, allowing for natural, context-aware conversations.
+Welcome! This is my project for the *"30 Days of AI Voice Agents" challenge*. Over the past month, I've built a fully functional, real-time streaming AI voice agent with a unique personality, and I'm thrilled to share the final result.
 
-The application is built with a Python backend using FastAPI and a vanilla JavaScript frontend.
+This project is a complete, end-to-end application that demonstrates a modern voice AI pipeline, from audio capture in the browser to a sophisticated, multi-skilled backend.
 
-
+[Screenshot 2025-08-30 205937.png
+](https://github.com/Disha-Sakarkar/Agent_Voice/blob/main/Screenshot%202025-08-30%20205937.png?raw=true)
+---
 
 ## ✨ Features
 
-* **Real-time Voice Conversation:** Speak to the agent and receive a spoken response.
-* **Context-Aware Memory:** The agent remembers previous turns in the conversation using a session-based chat history.
-* **Persistent Chat Sessions:** Chat history is saved to disk using Python's `shelve` module and survives server restarts.
-* **Session Management UI:** A sidebar displays all past conversations, allowing you to load and delete previous chats.
-* **End-to-End AI Pipeline:**
-    * **Speech-to-Text:** Powered by **AssemblyAI**.
-    * **LLM Logic:** Intelligent and contextual responses from **Google Gemini**.
-    * **Text-to-Speech:** Natural-sounding voice output from **Murf AI**.
-* **Robust Error Handling:** The agent provides a spoken fallback message if it cannot connect to the LLM.
+I've packed a bunch of advanced features into this agent:
 
-## 🏛️ Architectural Decisions & Tradeoffs
+* *Real-Time Streaming:* The entire pipeline is streaming. Audio is streamed from the client, transcribed in real-time by AssemblyAI, processed by the LLM, and the final audio response is streamed back from Murf AI for a low-latency experience.
+* *Unique Persona:* The agent embodies "Princess Sparkle," a whimsical and friendly royal companion, with all responses tailored to her personality.
+* *Multi-Skill Capability:* The agent has an "intent router" that understands the user's request and can perform different tasks:
+    * *General Chat:* For open-ended conversation.
+    * *Whimsical Story Weaver:* Generates unique, one-paragraph fairy tales on demand.
+    * *Royal Stargazer:* Fetches and reports the real-time location of the International Space Station (ISS).
+* *User-Configurable API Keys:* A sleek settings modal allows any user to securely enter their own API keys (for Murf, AssemblyAI, and Gemini), which are saved in the browser's local storage.
+* *Professional UI:* A clean, user-friendly interface with a side panel for instructions and a real-time chat history display.
 
-This section documents the reasoning behind the technical choices made during development.
+---
 
-* **Backend Framework: FastAPI**
-    * **Decision:** FastAPI was chosen as recommended by the challenge.
-    * **Justification:** Its modern, asynchronous nature is perfect for handling I/O-bound tasks like making API calls to external services. Features like automatic OpenAPI documentation (`/docs`) and Pydantic data validation are incredibly valuable for rapid development and debugging.
+## 🏛 How It's Built (Architecture)
 
-* **LLM: Google Gemini (`gemini-1.5-flash`)**
-    * **Decision:** The Gemini API was used as the core intelligence layer.
-    * **Justification:** It offers a very generous free tier (60 requests per minute) which is more than sufficient for development and prototyping. The `gemini-1.5-flash` model provides a great balance of speed and capability.
+The application uses a client-server model with a clear separation of concerns.
 
-* **Datastore: Python `shelve` Module**
-    * **Decision:** Instead of a full-fledged database, the built-in `shelve` module was used for persistence.
-    * **Tradeoff:** The primary benefit is **simplicity**. It requires no external dependencies or setup and acts like a persistent dictionary, making it ideal for a prototype. The tradeoff is that it is **not suitable for production** with high concurrency, as file-based databases can run into locking issues. It was chosen over a simple in-memory dictionary, which was not persistent across server restarts.
+* *The Brains (Backend):* Built with Python and *FastAPI*. It's now highly organized:
+    * main.py: Handles the WebSocket connection and orchestrates the AI pipeline.
+    * /services: Separate, modular files for each external API (AssemblyAI, Gemini, Murf, ISS), making the code clean and easy to maintain.
+* *The Face (Frontend):* A responsive UI built with vanilla *HTML, CSS, and JavaScript*. It uses the Web Audio API for high-quality audio capture and handles the complex logic of displaying the multi-skill conversation.
 
-## 🛠️ Tech Stack
+---
 
-* **Backend:** Python, FastAPI, Uvicorn
-* **Frontend:** HTML5, CSS3, JavaScript
-* **Python Libraries:** `google-generativeai`, `assemblyai`, `requests`, `python-dotenv`, `uvicorn`
-* **Services:** Google Cloud (for Gemini), Murf AI, AssemblyAI
+## 🛠 The Tech Stack
 
-## 🚀 Getting Started
+* *Backend:* Python, FastAPI, WebSockets
+* *Frontend:* HTML5, CSS3, JavaScript (Web Audio API)
+* *Speech-to-Text:* AssemblyAI Streaming API
+* *Language Model & Intent Routing:* Google Gemini API
+* *Text-to-Speech:* Murf AI Streaming API
+* *Deployment:* Render
 
-Follow these instructions to set up and run the project on your local machine.
+---
 
-### Prerequisites
+## 🚀 Get It Running Yourself!
 
-* Python 3.8+
-* An active internet connection
+*Live Demo:* https://your-royal-companion.onrender.com
 
-### Installation & Setup
+### Installation Steps
 
-1.  **Clone the repository:**
-    ```bash
-    git clone <your-repository-url>
-    cd <your-repository-name>
-    ```
-
-2.  **Create and activate a virtual environment:**
-    * **Windows:**
-        ```bash
-        python -m venv venv
-        .\venv\Scripts\activate
-        ```
-    * **macOS / Linux:**
-        ```bash
-        python3 -m venv venv
-        source venv/bin/activate
-        ```
-
-3.  **Install dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-4.  **Set up environment variables:**
-    Create a file named `.env` in the root project directory and add your API keys:
-    ```env
-    MURF_API_KEY="your_murf_api_key_here"
-    ASSEMBLYAI_API_KEY="your_assemblyai_api_key_here"
-    GOOGLE_API_KEY="your_google_gemini_api_key_here"
-    ```
-
-### Running the Application
-
-1.  From the root directory, run the FastAPI server:
-    ```bash
+1.  *Clone this repository.*
+2.  *Set up a virtual environment* and install the packages from requirements.txt.
+3.  **Create a .env file** in the root directory and add your API keys (this is mainly for local testing, as the app prioritizes keys from the UI).
+    env
+    ASSEMBLYAI_API_KEY="your_key_here"
+    GOOGLE_API_KEY="your_key_here"
+    MURF_API_KEY="your_key_here"
+    
+4.  *Run the server:*
+    bash
     uvicorn main:app --reload
-    ```
-2.  Open your web browser and navigate to `http://127.0.0.1:8000`.
+    
+5.  *Open the app* in your browser, click the settings icon, enter your API keys, and start talking!
