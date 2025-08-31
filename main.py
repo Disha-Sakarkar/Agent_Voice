@@ -62,6 +62,11 @@ async def websocket_endpoint(websocket: WebSocket):
                     
                     if event.end_of_turn:
                         logger.info(f"End of turn: '{full_transcript}'")
+                        # Send final transcript before processing
+                        asyncio.run_coroutine_threadsafe(
+                            websocket.send_text(f"FINAL_TRANSCRIPT:{full_transcript}"), 
+                            main_loop
+                        )
                         async def get_gemini_and_respond_task(text):
                             nonlocal chat_history
                             try:
