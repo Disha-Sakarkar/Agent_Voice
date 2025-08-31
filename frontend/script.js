@@ -124,12 +124,13 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (message.startsWith("AI_RESPONSE:")) {
             const aiResponse = message.substring("AI_RESPONSE:".length);
             addMessage(aiResponse, 'ai');
-            statusEl.textContent = "Her Highness is speaking...";
+            statusEl.textContent = "Your Highness is speaking...";
         } else if (message === "END_OF_TURN") {
             const liveBubble = chatHistory.querySelector('.user-bubble.live');
             if (liveBubble) {
-               addMessage(liveBubble.textContent, 'user');
-                liveBubble.remove();
+               const finalTranscript = liveBubble.textContent;
+               liveBubble.remove(); // Remove the temporary live bubble
+               addMessage(finalTranscript, 'user'); // Add a new, permanent user bubble
             }
             statusEl.textContent = "Considering your request...";
         } else {
