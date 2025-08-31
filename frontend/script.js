@@ -124,7 +124,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } else if (message.startsWith("AI_RESPONSE:")) {
         const aiResponse = message.substring("AI_RESPONSE:".length);
         addMessage(aiResponse, 'ai');
-        statusMessage.textContent = "Her Highness is speaking...";
+        statusMessage.textContent = "Your Highness is speaking...";
     } else if (message === "END_OF_TURN") {
         // --- 🎯 THIS IS THE CORRECTED LOGIC 🎯 ---
         const liveBubble = chatHistory.querySelector('.user-bubble.live');
