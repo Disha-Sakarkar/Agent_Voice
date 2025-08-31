@@ -3,22 +3,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const recordBtn = document.getElementById('recordBtn');
     const statusEl = document.getElementById('status');
     const chatHistory = document.getElementById('chat-history');
-    const audioPlayer = document.createElement('audio');
-
-    // Settings Modal Elements
     const settingsBtn = document.getElementById('settingsBtn');
     const settingsModal = document.getElementById('settingsModal');
     const closeBtn = document.querySelector('.close-btn');
     const saveKeysBtn = document.getElementById('saveKeysBtn');
+    const assemblyKeyInput = document.getElementById('assemblyKey');
+    const googleKeyInput = document.getElementById('googleKey');
+    const murfKeyInput = document.getElementById('murfKey');
+    const audioPlayer = document.createElement('audio');
 
     // --- Global State ---
     let isRecording = false;
     let webSocket = null;
-    let fullTranscript = "";
-    let audioChunksPlayback = [];
-    
-    // Web Audio API for recording
     let stream, audioContextRecording, processor, source;
+    let audioChunksPlayback = [];
 
     // --- Initialization ---
     function initializeApp() {
@@ -34,7 +32,6 @@ document.addEventListener('DOMContentLoaded', () => {
         closeBtn.addEventListener('click', () => settingsModal.style.display = 'none');
         saveKeysBtn.addEventListener('click', () => {
             saveApiKeys();
-            settingsModal.style.display = 'none';
             checkKeysAndSetStatus();
         });
         window.onclick = (event) => {
@@ -46,9 +43,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- API Key Management ---
     function saveApiKeys() {
-        localStorage.setItem('assemblyai_key', document.getElementById('assemblyKey').value);
-        localStorage.setItem('google_gemini_key', document.getElementById('googleKey').value);
-        localStorage.setItem('murf_ai_key', document.getElementById('murfKey').value);
+        const assemblyaiKey = document.getElementById('assemblyKey').value.trim();
+        const googleGeminiKey = document.getElementById('googleKey').value.trim();
+        const murfAiKey = document.getElementById('murfKey').value.trim();
+        if (!assemblyaiKey || !googleGeminiKey || !murfAiKey) {
+            alert("Please provide all three secret keys to continue.");
+            return;
+        }
+        localStorage.setItem('assemblyai_key', assemblyaiKey);
+        localStorage.setItem('google_gemini_key', googleGeminiKey);
+        localStorage.setItem('murf_ai_key', murfAiKey);
+        settingsModal.style.display = 'none';
         alert("Your royal keys have been saved!");
     }
 
@@ -103,145 +108,50 @@ document.addEventListener('DOMContentLoaded', () => {
             const keys = getApiKeys();
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const finalWsUrl = `${protocol}//${window.location.host}/ws?assemblyai_key=${keys.assemblyai}&google_gemini_key=${keys.google_gemini}&murf_ai_key=${keys.murf_ai}`;
-
             webSocket = new WebSocket(finalWsUrl);
             webSocket.onopen = resolve;
-            webSocket.onmessage = handleWebSocketMessage;
+            webSocket.onmessage = handleWebSocketMessage; // Use the corrected handler
             webSocket.onerror = (error) => { reject(error); };
-            webSocket.onclose = (event) => { 
-                if (isRecording) { stopRecordingCleanup(); } 
-                statusEl.textContent = event.reason || "My royal duties are complete. Speak again when you wish!"; 
+            webSocket.onclose = (event) => {
+                if (isRecording) { stopRecordingCleanup(); }
+                statusEl.textContent = event.reason || "My royal duties are complete. Speak again when you wish!";
             };
         });
     }
 
-   function handleWebSocketMessage(event) {
-    const message = event.data;
-    if (message.startsWith("AUDIO_CHUNK:")) {
-        audioChunksPlayback.push(base64ToArrayBuffer(message.substring("AUDIO_CHUNK:".length)));
-    } else if (message === "AUDIO_END") {
-        playConcatenatedAudio();
-    } else if (message.startsWith("AI_RESPONSE:")) {
-        const aiResponse = message.substring("AI_RESPONSE:".length);
-        addMessage(aiResponse, 'ai');
-        statusMessage.textContent = "Your Highness is speaking...";
-    } else if (message === "END_OF_TURN") {
-        // --- 🎯 THIS IS THE CORRECTED LOGIC 🎯 ---
-        const liveBubble = chatHistory.querySelector('.user-bubble.live');
-        if (liveBubble) {
-            // Take the final text from the live bubble
-            const finalTranscript = liveBubble.textContent;
-            // Remove the temporary live bubble
-            liveBubble.remove();
-            // Add a new, permanent user bubble with the final text
-            addMessage(finalTranscript, 'user');
-        }
-        statusMessage.textContent = "Considering your request...";
-    } else {
-        // This updates your speech in real-time in the live bubble
-        updateLiveTranscript(message);
-    }
-}
-
-    // --- Audio Playback Functions ---
-    function base64ToArrayBuffer(base64) {
-        const binaryString = window.atob(base64);
-        const len = binaryString.length;
-        const bytes = new Uint8Array(len);
-        for (let i = 0; i < len; i++) {
-            bytes[i] = binaryString.charCodeAt(i);
-        }
-        return bytes.buffer;
-    }
-
-    function playConcatenatedAudio() {
-        if (audioChunksPlayback.length === 0) return;
-        const audioBlob = new Blob(audioChunksPlayback, { type: 'audio/wav' });
-        const audioUrl = URL.createObjectURL(audioBlob);
-        audioPlayer.src = audioUrl;
-        audioPlayer.play();
-        audioPlayer.onended = () => {
-            console.log("Playback finished.");
-            URL.revokeObjectURL(audioUrl);
-            audioChunksPlayback = [];
-            statusEl.textContent = "Ready for your command";
-        };
-    }
-
-    // --- Recording Functions ---
-    function toggleRecording() { isRecording ? stopRecording() : startRecording(); }
-
-    function floatTo16BitPCM(input) {
-        const buffer = new ArrayBuffer(input.length * 2);
-        const view = new DataView(buffer);
-        for (let i = 0; i < input.length; i++) {
-            const s = Math.max(-1, Math.min(1, input[i]));
-            view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
-        }
-        return buffer;
-    }
-
-    async function startRecording() {
-        if (isRecording) return;
-
-        if (!audioPlayer.paused) {
-            audioPlayer.pause();
-            audioPlayer.currentTime = 0;
-            console.log("Agent playback interrupted.");
-        }
-
-        isRecording = true;
-        updateButtonUI(true);
-        statusEl.textContent = "Connecting...";
-
-        try {
-            await setupWebSocket();
-            stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            audioContextRecording = new AudioContext({ sampleRate: 16000 });
-            source = audioContextRecording.createMediaStreamSource(stream);
-            processor = audioContextRecording.createScriptProcessor(4096, 1, 1);
-            source.connect(processor);
-            processor.connect(audioContextRecording.destination);
-            processor.onaudioprocess = (e) => {
-                const inputData = e.inputBuffer.getChannelData(0);
-                const pcmData = floatTo16BitPCM(inputData);
-                if (webSocket && webSocket.readyState === WebSocket.OPEN) {
-                    webSocket.send(pcmData);
-                }
-            };
-        } catch (err) {
-            console.error("Microphone or WebSocket error:", err);
-            statusEl.textContent = "Could not start recording.";
-            stopRecordingCleanup();
-        }
-    }
-
-    function stopRecording() {
-        if (webSocket && webSocket.readyState === WebSocket.OPEN) {
-            webSocket.close();
-        }
-        stopRecordingCleanup();
-    }
-
-    function stopRecordingCleanup() {
-        if (processor) { processor.disconnect(); processor.onaudioprocess = null; }
-        if (source) source.disconnect();
-        if (audioContextRecording) audioContextRecording.close();
-        if (stream) { stream.getTracks().forEach(track => track.stop()); }
-        isRecording = false;
-        updateButtonUI(false);
-    }
-
-    function updateButtonUI(recording) {
-        const icon = recordBtn.querySelector('.icon');
-        if (recording) {
-            recordBtn.classList.add("recording");
-            icon.textContent = "⏹️";
+    // --- 🎯 FINAL CORRECTED MESSAGE HANDLER 🎯 ---
+    function handleWebSocketMessage(event) {
+        const message = event.data;
+        if (message.startsWith("AUDIO_CHUNK:")) {
+            audioChunksPlayback.push(base64ToArrayBuffer(message.substring("AUDIO_CHUNK:".length)));
+        } else if (message === "AUDIO_END") {
+            playConcatenatedAudio();
+        } else if (message.startsWith("AI_RESPONSE:")) {
+            const aiResponse = message.substring("AI_RESPONSE:".length);
+            addMessage(aiResponse, 'ai');
+            statusEl.textContent = "Her Highness is speaking...";
+        } else if (message === "END_OF_TURN") {
+            const liveBubble = chatHistory.querySelector('.user-bubble.live');
+            if (liveBubble) {
+                // This makes your spoken message permanent in the history
+                liveBubble.classList.remove('live');
+            }
+            statusEl.textContent = "Considering your request...";
         } else {
-            recordBtn.classList.remove("recording");
-            icon.textContent = "🎙️";
+            // This updates your speech in real-time in the live bubble
+            updateLiveTranscript(message);
         }
     }
+    
+    // --- Audio Playback & Recording Functions ---
+    function base64ToArrayBuffer(base64) { const binaryString = window.atob(base64); const len = binaryString.length; const bytes = new Uint8Array(len); for (let i = 0; i < len; i++) { bytes[i] = binaryString.charCodeAt(i); } return bytes.buffer; }
+    function playConcatenatedAudio() { if (audioChunksPlayback.length === 0) return; const audioBlob = new Blob(audioChunksPlayback, { type: 'audio/wav' }); const audioUrl = URL.createObjectURL(audioBlob); audioPlayer.src = audioUrl; audioPlayer.play(); audioPlayer.onended = () => { URL.revokeObjectURL(audioUrl); audioChunksPlayback = []; statusEl.textContent = "Ready for your command"; }; }
+    function toggleRecording() { isRecording ? stopRecording() : startRecording(); }
+    function floatTo16BitPCM(input) { const buffer = new ArrayBuffer(input.length * 2); const view = new DataView(buffer); for (let i = 0; i < input.length; i++) { const s = Math.max(-1, Math.min(1, input[i])); view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true); } return buffer; }
+    async function startRecording() { if (isRecording) return; if (!audioPlayer.paused) { audioPlayer.pause(); audioPlayer.currentTime = 0; } isRecording = true; updateButtonUI(true); statusEl.textContent = "Connecting..."; try { await setupWebSocket(); stream = await navigator.mediaDevices.getUserMedia({ audio: true }); audioContextRecording = new AudioContext({ sampleRate: 16000 }); source = audioContextRecording.createMediaStreamSource(stream); processor = audioContextRecording.createScriptProcessor(4096, 1, 1); source.connect(processor); processor.connect(audioContextRecording.destination); processor.onaudioprocess = (e) => { const inputData = e.inputBuffer.getChannelData(0); const pcmData = floatTo16BitPCM(inputData); if (webSocket && webSocket.readyState === WebSocket.OPEN) { webSocket.send(pcmData); } }; } catch (err) { console.error("Microphone or WebSocket error:", err); statusEl.textContent = "Could not start recording."; stopRecordingCleanup(); } }
+    function stopRecording() { if (webSocket && webSocket.readyState === WebSocket.OPEN) { webSocket.close(); } stopRecordingCleanup(); }
+    function stopRecordingCleanup() { if (processor) { processor.disconnect(); processor.onaudioprocess = null; } if (source) source.disconnect(); if (audioContextRecording) { audioContextRecording.close().catch(e => console.error(e)); } if (stream) { stream.getTracks().forEach(track => track.stop()); } isRecording = false; updateButtonUI(false); }
+    function updateButtonUI(recording) { const icon = recordBtn.querySelector('.icon'); if (recording) { recordBtn.classList.add("recording"); icon.textContent = "⏹️"; } else { recordBtn.classList.remove("recording"); icon.textContent = "🎙️"; } }
 
     initializeApp();
 });
