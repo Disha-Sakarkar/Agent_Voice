@@ -84,6 +84,13 @@ document.addEventListener('DOMContentLoaded', () => {
         bubble.textContent = text;
         chatHistory.appendChild(bubble);
         chatHistory.scrollTop = chatHistory.scrollHeight;
+        
+        // Store user messages in the full transcript
+        if (type === 'user') {
+            fullTranscript += `User: ${text}\n`;
+        } else if (type === 'ai') {
+            fullTranscript += `AI: ${text}\n`;
+        }
     }
 
     function updateLiveTranscript(text) {
@@ -115,33 +122,37 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-function handleWebSocketMessage(event) {
-    const message = event.data;
-    if (message.startsWith("AUDIO_CHUNK:")) {
-        audioChunksPlayback.push(base64ToArrayBuffer(message.substring("AUDIO_CHUNK:".length)));
-    } else if (message === "AUDIO_END") {
-        playConcatenatedAudio();
-    } else if (message.startsWith("AI_RESPONSE:")) {
-        const aiResponse = message.substring("AI_RESPONSE:".length);
-        addMessage(aiResponse, 'ai');
-        statusEl.textContent = "Your Highness is speaking...";
-    } else if (message === "END_OF_TURN") {
-        // --- 🎯 THIS IS THE CORRECTED LOGIC 🎯 ---
-        const liveBubble = chatHistory.querySelector('.user-bubble.live');
-        if (liveBubble) {
-            // Take the final text from the live bubble
-            const finalTranscript = liveBubble.textContent;
-            // Remove the temporary live bubble
-            liveBubble.remove();
-            // Add a new, permanent user bubble with the final text
+    function handleWebSocketMessage(event) {
+        const message = event.data;
+        if (message.startsWith("AUDIO_CHUNK:")) {
+            audioChunksPlayback.push(base64ToArrayBuffer(message.substring("AUDIO_CHUNK:".length)));
+        } else if (message === "AUDIO_END") {
+            playConcatenatedAudio();
+        } else if (message.startsWith("AI_RESPONSE:")) {
+            const aiResponse = message.substring("AI_RESPONSE:".length);
+            addMessage(aiResponse, 'ai');
+            statusEl.textContent = "Her Highness is speaking...";
+        } else if (message === "END_OF_TURN") {
+            // Convert the live transcript to a permanent user message
+            const liveBubble = chatHistory.querySelector('.user-bubble.live');
+            if (liveBubble && liveBubble.textContent.trim() !== '') {
+                // Create a permanent user message with the live transcript content
+                addMessage(liveBubble.textContent, 'user');
+                // Remove the temporary live bubble
+                liveBubble.remove();
+            }
+            statusEl.textContent = "Considering your request...";
+        } else if (message.startsWith("FINAL_TRANSCRIPT:")) {
+            // Handle final transcript from backend
+            const finalTranscript = message.substring("FINAL_TRANSCRIPT:".length);
+            const liveBubble = chatHistory.querySelector('.user-bubble.live');
+            if (liveBubble) liveBubble.remove();
             addMessage(finalTranscript, 'user');
+        } else {
+            // This updates your speech in real-time in the live bubble
+            updateLiveTranscript(message);
         }
-        statusEl.textContent = "Considering your request...";
-    } else {
-        // This updates your speech in real-time in the live bubble
-        updateLiveTranscript(message);
     }
-}  
 
     // --- Audio Playback Functions ---
     function base64ToArrayBuffer(base64) {
@@ -230,6 +241,10 @@ function handleWebSocketMessage(event) {
         if (stream) { stream.getTracks().forEach(track => track.stop()); }
         isRecording = false;
         updateButtonUI(false);
+        
+        // Remove any live transcript bubble if it exists
+        const liveBubble = chatHistory.querySelector('.user-bubble.live');
+        if (liveBubble) liveBubble.remove();
     }
 
     function updateButtonUI(recording) {
