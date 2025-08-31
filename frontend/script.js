@@ -115,28 +115,33 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function handleWebSocketMessage(event) {
-        const message = event.data;
-        if (message.startsWith("AUDIO_CHUNK:")) {
-            audioChunksPlayback.push(base64ToArrayBuffer(message.substring("AUDIO_CHUNK:".length)));
-        } else if (message === "AUDIO_END") {
-            playConcatenatedAudio();
-        } else if (message.startsWith("AI_RESPONSE:")) {
-            const aiResponse = message.substring("AI_RESPONSE:".length);
-            addMessage(aiResponse, 'ai');
-            statusEl.textContent = "Your Highness is speaking...";
-        } else if (message === "END_OF_TURN") {
-            const liveBubble = chatHistory.querySelector('.user-bubble.live');
-            if (liveBubble) {
-               const finalTranscript = liveBubble.textContent;
-               liveBubble.remove(); // Remove the temporary live bubble
-               addMessage(finalTranscript, 'user'); // Add a new, permanent user bubble
-            }
-            statusEl.textContent = "Considering your request...";
-        } else {
-            updateLiveTranscript(message);
+   function handleWebSocketMessage(event) {
+    const message = event.data;
+    if (message.startsWith("AUDIO_CHUNK:")) {
+        audioChunksPlayback.push(base64ToArrayBuffer(message.substring("AUDIO_CHUNK:".length)));
+    } else if (message === "AUDIO_END") {
+        playConcatenatedAudio();
+    } else if (message.startsWith("AI_RESPONSE:")) {
+        const aiResponse = message.substring("AI_RESPONSE:".length);
+        addMessage(aiResponse, 'ai');
+        statusMessage.textContent = "Her Highness is speaking...";
+    } else if (message === "END_OF_TURN") {
+        // --- 🎯 THIS IS THE CORRECTED LOGIC 🎯 ---
+        const liveBubble = chatHistory.querySelector('.user-bubble.live');
+        if (liveBubble) {
+            // Take the final text from the live bubble
+            const finalTranscript = liveBubble.textContent;
+            // Remove the temporary live bubble
+            liveBubble.remove();
+            // Add a new, permanent user bubble with the final text
+            addMessage(finalTranscript, 'user');
         }
+        statusMessage.textContent = "Considering your request...";
+    } else {
+        // This updates your speech in real-time in the live bubble
+        updateLiveTranscript(message);
     }
+}
 
     // --- Audio Playback Functions ---
     function base64ToArrayBuffer(base64) {
