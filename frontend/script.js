@@ -128,7 +128,8 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (message === "END_OF_TURN") {
             const liveBubble = chatHistory.querySelector('.user-bubble.live');
             if (liveBubble) {
-                liveBubble.classList.remove('live');
+               addMessage(liveBubble.textContent, 'user');
+                liveBubble.remove();
             }
             statusEl.textContent = "Considering your request...";
         } else {
